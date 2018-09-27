@@ -1,0 +1,41 @@
+table.sudoku {
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-family: sans-serif;
+    font-size: 25px;
+    text-align: center;
+}
+
+td.sudoku-cell {
+    border-style: solid;
+    border-width: thin;
+    height: 50px;
+    width: 50px;
+}
+
+td.sudoku-right {
+    border-right-width: medium;
+}
+
+td.sudoku-left {
+    border-left-width: medium;
+}
+
+td.sudoku-top {
+    border-top-width: medium;
+}
+
+td.sudoku-bottom {
+    border-bottom-width: medium;
+}
+
+table.sudoku-possibility-table {
+    table-layout: fixed;
+}
+
+td.sudoku-possibility {
+    border-style: none;
+    font-size: 9px;
+    width: 33;
+    padding: 0;
+}
