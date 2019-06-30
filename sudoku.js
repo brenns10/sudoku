@@ -115,30 +115,35 @@ class Sudoku {
    */
   findObviousMoves() {
     let moves = [];
-    for (let r = 0; r < this.degree * this.degree; r++) {
-      for (let c = 0; c < this.degree * this.degree; c++) {
-        if (this.val[r][c] !== 0)
-          continue;
+    for (let [r, c] of this.iterAll()) {
+      if (this.val[r][c] !== 0)
+        continue;
 
-        let possibleDigits = this.forEachDigit(d => {
-          if (this.poss[r][c][d])
-            return d;
-        });
-
-        if (possibleDigits.length === 1) {
-          moves.push([r, c, possibleDigits[0], "only option"]);
-          continue;
+      let possibleDigits = []
+      for (let d of this.iterDigits()) {
+        if (this.poss[r][c][d]) {
+          possibleDigits.push(d);
         }
+      }
 
-        for (let d of possibleDigits) {
-          let checker = this.digitChecker(d);
-          let rowPoss = this.forOthersInRow(r, c, checker).length
-          let colPoss = this.forOthersInCol(r, c, checker).length
-          let blockPoss = this.forOthersInCol(r, c, checker).length
-          if (rowPoss === 0 || colPoss === 0 || blockPoss === 0) {
-            let msg = "row:" + rowPoss + " col:" + colPoss + " block:" + blockPoss;
-            moves.push([r, c, d, msg])
-          }
+      if (possibleDigits.length === 1) {
+        moves.push([r, c, possibleDigits[0], "this was the only option for this cell"]);
+        console.log('Add move (' + r + ', ' + c + ') = ' + possibleDigits[0] + ' (only option)');
+        continue;
+      }
+
+      for (let d of possibleDigits) {
+        let checker = this.digitChecker(d);
+        let msg = "this digit was only possible here for this:"
+        let rowPoss = this.any(this.iterOthersInRow(r, c), checker);
+        if (!rowPoss) msg += " row";
+        let colPoss = this.any(this.iterOthersInCol(r, c), checker);
+        if (!colPoss) msg += " col";
+        let blockPoss = this.any(this.iterOthersInBlock(r, c), checker);
+        if (!blockPoss) msg += " block";
+        if (!rowPoss || !colPoss || !blockPoss) {
+          moves.push([r, c, d, msg])
+          console.log('Add move (' + r + ', ' + c + ') = ' + d + ' ' + msg);
         }
       }
     }
@@ -146,12 +151,14 @@ class Sudoku {
   }
 
   /**
-   * A function which will return (something)
+   * A function which will return true if the digit is possible for a cell.
    */
   digitChecker(digit) {
-    return (r, c) => {
+    return (cell) => {
+      let [r, c] = cell;
       if (this.poss[r][c][digit])
         return true;
+      return false;
     }
   }
 
@@ -173,20 +180,21 @@ class Sudoku {
    */
   setCellValue(row, col, digit) {
     /* 1. set cell value and update display */
+    console.log('Set ' + row + ', ' + col + ' to ' + digit);
     this.val[row][col] = digit;
     this.display.setCellValue(row, col, digit);
 
     /* 2. update possibilities for this cell but don't update display */
     this.poss[row][col][digit] = true;
-    this.forOtherDigits(digit, digitToClear => {
+    for (let digitToClear of this.iterOtherDigits(digit)) {
       this.poss[row][col][digitToClear] = false;
-    });
+    }
 
     /* 3. remove digit from row, col, block possibilities */
-    let clearIt = this.digitClearer(digit);
-    this.forOthersInRow(row, col, clearIt);
-    this.forOthersInCol(row, col, clearIt);
-    this.forOthersInBlock(row, col, clearIt);
+    const clearIt = this.digitClearer(digit);
+    this.emap(this.iterOthersInRow(row, col), clearIt);
+    this.emap(this.iterOthersInCol(row, col), clearIt);
+    this.emap(this.iterOthersInBlock(row, col), clearIt);
   }
 
   /**
@@ -194,7 +202,8 @@ class Sudoku {
    * update the display (if necessary).
    */
   digitClearer(digit) {
-    return (r, c) => {
+    return (cell) => {
+      let [r, c] = cell;
       if (this.poss[r][c][digit]) {
         this.poss[r][c][digit] = false;
         this.display.setCellPossibilities(r, c, this.poss[r][c]);
@@ -241,77 +250,86 @@ class Sudoku {
     }
   }
 
-  forEachInRow(row, fn) {
-    let rv = [];
-    for (let col = 0; col < this.degree * this.degree; col++) {
-      let ret = fn(row, col);
-      if (ret !== undefined)
-        rv.push(ret);
-    }
-    return rv;
+  *iterRow(row) {
+    for (let col = 0; col < this.degree * this.degree; col++)
+      yield [row, col];
   }
 
-  forEachInCol(col, fn) {
-    let rv = [];
-    for (let row = 0; row < this.degree * this.degree; row++) {
-      let ret = fn(row, col);
-      if (ret !== undefined)
-        rv.push(ret);
-    }
-    return rv;
+  *transpose(iter) {
+    for (let [row, col] of iter)
+      yield [col, row];
   }
 
-  forEachInBlock(row, col, fn) {
+  *iterCol(col) {
+    yield *this.transpose(this.iterRow(col));
+  }
+
+  *iterBlock(row, col) {
     let topRow = Math.floor(row / this.degree) * this.degree;
     let leftCol = Math.floor(col / this.degree) * this.degree;
-    let rv = [];
 
     for (let rowRv = topRow; rowRv < topRow + this.degree; rowRv++) {
       for (let colRv = leftCol; colRv < leftCol + this.degree; colRv++) {
-        let ret = fn(rowRv, colRv);
-        if (ret !== undefined)
-          rv.push(ret);
+        yield [rowRv, colRv];
       }
     }
-    return rv;
   }
 
-  forOthersInRow(row, col, fn) {
-    return this.forEachInRow(row, (newRow, newCol) => {
-      if (newCol != col)
-        return fn(newRow, newCol);
-    });
-  }
-
-  forOthersInCol(row, col, fn) {
-    return this.forEachInCol(col, (newRow, newCol) => {
-      if (newRow != row)
-        return fn(newRow, newCol);
-    });
-  }
-
-  forOthersInBlock(row, col, fn) {
-    return this.forEachInBlock(row, col, (newRow, newCol) => {
-      if ((newRow !== row) && (newCol !== col))
-        return fn(newRow, newCol);
-    });
-  }
-
-  forEachDigit(fn) {
-    let rv = [];
-    for (let digit = 1; digit <= this.degree * this.degree + 1; digit++) {
-      let ret = fn(digit);
-      if (ret !== undefined)
-        rv.push(ret)
+  *filter(iter, fn) {
+    for (let item of iter) {
+      if (fn(item)) {
+        yield item;
+      }
     }
-    return rv;
   }
 
-  forOtherDigits(digit, fn) {
-    return this.forEachDigit((newDigit) => {
-      if (newDigit !== digit)
-        return fn(newDigit);
-    });
+  ne(row, col) {
+    return (l) => (l[0] !== row || l[1] !== col);
+  }
+
+  *iterOthersInRow(row, col) {
+    yield *this.filter(this.iterRow(row), this.ne(row, col));
+  }
+
+  *iterOthersInCol(row, col) {
+    yield *this.filter(this.iterCol(col), this.ne(row, col));
+  }
+
+  *iterOthersInBlock(row, col) {
+    yield *this.filter(this.iterBlock(row, col), this.ne(row, col));
+  }
+
+  *iterAll(row, col) {
+    for (let row = 0; row < this.degree * this.degree; row++)
+      for (let col = 0; col < this.degree * this.degree; col++)
+        yield [row, col];
+  }
+
+  *iterDigits() {
+    for (let digit = 1; digit < this.degree * this.degree + 1; digit++)
+      yield digit;
+  }
+
+  *iterOtherDigits(d) {
+    yield *this.filter(this.iterDigits(), (x) => x !== d);
+  }
+
+  *map(iter, f) {
+    for (let x of iter)
+      yield f(x);
+  }
+
+  emap(iter, f) {
+    for (let x of iter) {
+      f(x);
+    }
+  }
+
+  any(iter, fn) {
+    for (let x of iter)
+      if (fn(x))
+        return true;
+    return false;
   }
 
   step() {
