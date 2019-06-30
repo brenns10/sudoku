@@ -347,6 +347,10 @@ class Sudoku {
   }
 }
 
-let disp = new SudokuDisplay(3, "sudoku");
-let sud = new Sudoku(3, disp, []);
-document.getElementById("step").onclick = () => sud.step();
+var sid, disp;
+document.getElementById("puzzle-load").onclick = function () {
+    const response = JSON.parse(document.getElementById("puzzle-json").value);
+    disp = new SudokuDisplay(3, "sudoku");
+    sud = new Sudoku(3, disp, response.squares.map((x) => [x.y, x.x, x.value]));
+    document.getElementById("step").onclick = () => sud.step();
+};
