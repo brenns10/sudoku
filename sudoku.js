@@ -167,11 +167,21 @@ class Display {
     }
   }
 
+  applyHint(event) {
+    if (this.hint !== undefined) {
+      let [row, col] = this.hint;
+      this.grid[row][col].classList.remove("sudoku-highlight");
+    }
+    this.grid[event.row][event.col].classList.add("sudoku-highlight");
+    this.hint = [event.row, event.col];
+  }
+
   doStep() {
     console.log("Doing a step...")
     for (let solver of this.solvers) {
       for (let move of solver.generateMoves()) {
         console.log("Got move!")
+        this.applyHint(move);
         this.game.applyMove(move);
         return;
       }

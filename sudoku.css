@@ -39,3 +39,7 @@ td.sudoku-possibility {
     width: 33;
     padding: 0;
 }
+
+td.sudoku-highlight {
+    background-color: rgb(230, 230, 180);
+}
