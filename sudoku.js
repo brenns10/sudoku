@@ -1,4 +1,4 @@
-/*
+/**
  * Remove all children. Usefull method found at MDN:
  * https://developer.mozilla.org/en-US/docs/Web/API/Node#Remove_all_children_nested_within_a_node
  */
@@ -9,46 +9,80 @@ Element.prototype.removeAll = function() {
   return this;
 }
 
-/* an easy default game to play */
-default_cells = [
-  [0, 2, 7],
-  [0, 3, 4],
-  [1, 0, 1],
-  [1, 8, 7],
-  [2, 3, 9],
-  [2, 7, 8],
-  [3, 7, 9],
-  [3, 8, 8],
-  [4, 1, 4],
-  [4, 4, 6],
-  [4, 5, 5],
-  [4, 7, 3],
-  [5, 0, 3],
-  [5, 2, 8],
-  [5, 4, 2],
-  [6, 0, 4],
-  [7, 0, 2],
-  [7, 3, 5],
-  [7, 6, 3],
-  [8, 2, 1],
-  [8, 3, 7],
-  [8, 5, 3],
-  [8, 7, 5]
-]
+/*
+ * Some utility functions for dealing with iterators of "cells"
+ */
+function *filter(iter, fn) {
+  for (let item of iter) {
+    if (fn(item)) {
+      yield item;
+    }
+  }
+}
 
+function ne(row, col) {
+  return (l) => (l[0] !== row || l[1] !== col);
+}
+
+function *transpose(iter) {
+  for (let [row, col] of iter)
+    yield [col, row];
+}
+
+function *map(iter, f) {
+  for (let x of iter)
+    yield f(x);
+}
+
+function any(iter, fn) {
+  for (let x of iter)
+    if (fn(x))
+      return true;
+  return false;
+}
+
+function emap(iter, f) {
+  for (let x of iter) {
+    f(x);
+  }
+}
+
+const SOLVERS = [];
 
 /**
- * Contains all display logic.
- *
- * Hypothetically, we could swap this out with an implementation for CLI.
+ * A Sudoku game display. It is responsible for creating and updating games,
+ * managing solvers, handling user-input, and of course, displaying the game to
+ * some UI. Hypothetically, we could swap this out with an implementation for
+ * CLI :)
  */
-class SudokuDisplay {
+class Display {
+  /**
+   * Create a new display.
+   * @param {number} degree The base size of the game (2 -> 4x4, 3 -> 9x9, etc)
+   * @param {*} id Prefix for all the element IDs used
+   */
   constructor(degree, id) {
-    this.table = document.getElementById(id);
-    this.table.removeAll();
+    let self = this;
+    this.table = document.getElementById(id + "-table");
+    this.jsonText = document.getElementById(id + "-json-text");
+    this.load = document.getElementById(id + "-load");
+    this.step = document.getElementById(id + "-step");
+
     this.degree = degree;
     this.grid = []
+    this.game = null;
+    this.solvers = [];
 
+    this.table.removeAll();
+    this.load.onclick = () => self.loadGame();
+    this.step.onclick = () => self.doStep();
+    this.initCells();
+  }
+
+  /**
+   * Initialize the table which actually contains the sudoku cells.
+   */
+  initCells() {
     for (let rowIdx = 0; rowIdx < this.degree * this.degree; rowIdx++) {
       let row = this.table.insertRow();
       this.grid.push([]);
@@ -57,7 +91,7 @@ class SudokuDisplay {
         this.grid[rowIdx].push(cell);
         cell.classList.add("sudoku-cell");
 
-        // add sudoku-top, sudoku-bottom, sudoku-left, sudoku-right
+        // add sudoku-top, sudoku-bottom, sudoku-left, sudoku-right CSS classes
         function setEdgeClasses(idx, degree, firstSuffix, lastSuffix) {
           if (idx % degree === 0)
             cell.classList.add("sudoku-" + firstSuffix);
@@ -70,11 +104,50 @@ class SudokuDisplay {
     }
   }
 
-  setCellValue(rowIdx, colIdx, value) {
-    this.grid[rowIdx][colIdx].textContent = value;
+  /**
+   * When the "Load" button is pressed, read the JSON blob and pull out cell
+   * values, and start up a game!
+   */
+  loadGame() {
+    // Create an empty game object and update the possibilities display
+    this.game = new Sudoku(this.degree);
+    this.solvers = [];
+    for (let Ctor of SOLVERS)
+      this.solvers.push(new Ctor(this.game))
+    for (let [row, col] of this.game.iterAll())
+      // it says handleRemovePossibility() but really it will just display any
+      // possibility array
+      this.handleRemovePossibility(row, col, this.game.poss[row][col]);
+
+    // Connect our event handler to deal with further UI updates from loading
+    // the game data
+    this.game.addHandler("display", (evt) => this.handler(evt));
+
+    // And load the data
+    const puzzle = JSON.parse(this.jsonText.value);
+    for (let square of puzzle.squares)
+      this.game.setDigit(square.y, square.x, square.value);
   }
 
-  setCellPossibilities(rowIdx, colIdx, possibilities) {
+  /**
+   * Handle a game event by updating the UI
+   * @param {object} event 
+   */
+  handler(event) {
+    console.log(event)
+    if (event.event === "setDigit")
+      this.handleSetDigit(event.row, event.col, event.digit);
+    else if (event.event == "removePossibility")
+      this.handleRemovePossibility(
+        event.row, event.col, this.game.poss[event.row][event.col]);
+  }
+
+  handleSetDigit(row, col, digit) {
+    this.grid[row][col].removeAll();
+    this.grid[row][col].textContent = digit;
+  }
+
+  handleRemovePossibility(rowIdx, colIdx, possibilities) {
     const cell = this.grid[rowIdx][colIdx];
     cell.removeAll();
     const table = document.createElement("table");
@@ -93,122 +166,26 @@ class SudokuDisplay {
       }
     }
   }
+
+  doStep() {
+    console.log("Doing a step...")
+    for (let solver of this.solvers) {
+      for (let move of solver.generateMoves()) {
+        console.log("Got move!")
+        this.game.applyMove(move);
+        return;
+      }
+    }
+    console.log("Needs more work.");
+  }
 }
 
 class Sudoku {
   constructor(degree, display, cells) {
     this.degree = degree;
-    this.display = display;
+    this.handlers = new Map();
     this.initPossibilities();
     this.initValues();
-
-    if (cells.length === 0) {
-      cells = default_cells;
-    }
-    this.applyMoves(cells);
-  }
-
-  /**
-   * Return a list of the obvious moves:
-   * (a) the only thing that can be done with a cell
-   * (b) there is only one cell which can be digit in a row/col/block
-   */
-  findObviousMoves() {
-    let moves = [];
-    for (let [r, c] of this.iterAll()) {
-      if (this.val[r][c] !== 0)
-        continue;
-
-      let possibleDigits = []
-      for (let d of this.iterDigits()) {
-        if (this.poss[r][c][d]) {
-          possibleDigits.push(d);
-        }
-      }
-
-      if (possibleDigits.length === 1) {
-        moves.push([r, c, possibleDigits[0], "this was the only option for this cell"]);
-        console.log('Add move (' + r + ', ' + c + ') = ' + possibleDigits[0] + ' (only option)');
-        continue;
-      }
-
-      for (let d of possibleDigits) {
-        let checker = this.digitChecker(d);
-        let msg = "this digit was only possible here for this:"
-        let rowPoss = this.any(this.iterOthersInRow(r, c), checker);
-        if (!rowPoss) msg += " row";
-        let colPoss = this.any(this.iterOthersInCol(r, c), checker);
-        if (!colPoss) msg += " col";
-        let blockPoss = this.any(this.iterOthersInBlock(r, c), checker);
-        if (!blockPoss) msg += " block";
-        if (!rowPoss || !colPoss || !blockPoss) {
-          moves.push([r, c, d, msg])
-          console.log('Add move (' + r + ', ' + c + ') = ' + d + ' ' + msg);
-        }
-      }
-    }
-    return moves;
-  }
-
-  /**
-   * A function which will return true if the digit is possible for a cell.
-   */
-  digitChecker(digit) {
-    return (cell) => {
-      let [r, c] = cell;
-      if (this.poss[r][c][digit])
-        return true;
-      return false;
-    }
-  }
-
-  /**
-   * Given an array of moves [[r, c, d, optional message], ...],
-   * apply them!
-   */
-  applyMoves(moves) {
-    for (let cell of moves) {
-      this.setCellValue(cell[0], cell[1], cell[2]);
-    }
-  }
-
-  /**
-   * Enter a digit into a cell. Performs the following tasks:
-   * 1. set the cell value (update display)
-   * 2. clear all possibilities but "digit" for that cell
-   * 3. for the row, col, and block, update the possibilities (update display)
-   */
-  setCellValue(row, col, digit) {
-    /* 1. set cell value and update display */
-    console.log('Set ' + row + ', ' + col + ' to ' + digit);
-    this.val[row][col] = digit;
-    this.display.setCellValue(row, col, digit);
-
-    /* 2. update possibilities for this cell but don't update display */
-    this.poss[row][col][digit] = true;
-    for (let digitToClear of this.iterOtherDigits(digit)) {
-      this.poss[row][col][digitToClear] = false;
-    }
-
-    /* 3. remove digit from row, col, block possibilities */
-    const clearIt = this.digitClearer(digit);
-    this.emap(this.iterOthersInRow(row, col), clearIt);
-    this.emap(this.iterOthersInCol(row, col), clearIt);
-    this.emap(this.iterOthersInBlock(row, col), clearIt);
-  }
-
-  /**
-   * Return a function of (row, col) which will set digit to impossible, and
-   * update the display (if necessary).
-   */
-  digitClearer(digit) {
-    return (cell) => {
-      let [r, c] = cell;
-      if (this.poss[r][c][digit]) {
-        this.poss[r][c][digit] = false;
-        this.display.setCellPossibilities(r, c, this.poss[r][c]);
-      }
-    }
   }
 
   /*
@@ -245,8 +222,87 @@ class Sudoku {
         for (let digit = 0; digit < this.degree * this.degree + 1; digit++) {
           this.poss[row][col].push(true);
         }
-        this.display.setCellPossibilities(row, col, this.poss[row][col]);
       }
+    }
+  }
+
+  /**
+   * Enter a digit into a cell.
+   */
+  setDigit(row, col, digit) {
+    /* 1. set cell value and update display */
+    console.log(`Set (${row}, ${col}) to ${digit}.`);
+    this.val[row][col] = digit;
+    this.sendEvent({
+      event: "setDigit",
+      row: row, col: col, digit: digit
+    });
+
+    /* 2. update possibilities for this cell. This is bookkeeping to simplify
+     * calling code. We don't create events for this. */
+    this.poss[row][col][digit] = true;
+    for (let digitToClear of this.iterOtherDigits(digit)) {
+      this.poss[row][col][digitToClear] = false;
+    }
+
+    /* 3. remove digit from row, col, block possibilities */
+    const clearIt = this.digitClearer(digit);
+    emap(this.iterOthersInRow(row, col), clearIt);
+    emap(this.iterOthersInCol(row, col), clearIt);
+    emap(this.iterOthersInBlock(row, col), clearIt);
+  }
+
+  removePossibility(row, col, digit) {
+    if (this.poss[row][col][digit]) {
+      this.poss[row][col][digit] = false;
+      this.sendEvent({
+        event: "removePossibility",
+        row: row, col: col, digit: digit
+      });
+    }
+  }
+
+  sendEvent(event) {
+    for (let [id, handler] of this.handlers) {
+      handler(event);
+    }
+  }
+
+  addHandler(id, hdlr) {
+    this.handlers.set(id, hdlr);
+  }
+
+  applyMove(event) {
+    switch (event.event) {
+      case "setDigit":
+        this.setDigit(event.row, event.col, event.digit);
+        break;
+      case "removePossibility":
+        this.removePossibility(event.row, event.col, event.digit);
+        break;
+    }
+  }
+
+  /**
+   * A function which will return true if the digit is possible for a cell.
+   */
+  digitChecker(digit) {
+    return (cell) => {
+      let [r, c] = cell;
+      if (this.poss[r][c][digit])
+        return true;
+      return false;
+    }
+  }
+
+  /**
+   * Return a function of (row, col) which will set digit to impossible, and
+   * update the event handlers (if necessary).
+   */
+  digitClearer(digit) {
+    return (cell) => {
+      let [r, c] = cell;
+      this.removePossibility(r, c, digit);
     }
   }
 
@@ -255,13 +311,8 @@ class Sudoku {
       yield [row, col];
   }
 
-  *transpose(iter) {
-    for (let [row, col] of iter)
-      yield [col, row];
-  }
-
   *iterCol(col) {
-    yield *this.transpose(this.iterRow(col));
+    yield *transpose(this.iterRow(col));
   }
 
   *iterBlock(row, col) {
@@ -275,28 +326,16 @@ class Sudoku {
     }
   }
 
-  *filter(iter, fn) {
-    for (let item of iter) {
-      if (fn(item)) {
-        yield item;
-      }
-    }
-  }
-
-  ne(row, col) {
-    return (l) => (l[0] !== row || l[1] !== col);
-  }
-
   *iterOthersInRow(row, col) {
-    yield *this.filter(this.iterRow(row), this.ne(row, col));
+    yield *filter(this.iterRow(row), ne(row, col));
   }
 
   *iterOthersInCol(row, col) {
-    yield *this.filter(this.iterCol(col), this.ne(row, col));
+    yield *filter(this.iterCol(col), ne(row, col));
   }
 
   *iterOthersInBlock(row, col) {
-    yield *this.filter(this.iterBlock(row, col), this.ne(row, col));
+    yield *filter(this.iterBlock(row, col), ne(row, col));
   }
 
   *iterAll(row, col) {
@@ -311,46 +350,61 @@ class Sudoku {
   }
 
   *iterOtherDigits(d) {
-    yield *this.filter(this.iterDigits(), (x) => x !== d);
+    yield *filter(this.iterDigits(), (x) => x !== d);
+  }
+}
+
+class ObviousSolver {
+  constructor(game) {
+    this.game = game;
   }
 
-  *map(iter, f) {
-    for (let x of iter)
-      yield f(x);
-  }
+  /**
+   * Return a list of the obvious moves:
+   * (a) the only thing that can be done with a cell
+   * (b) there is only one cell which can be digit in a row/col/block
+   */
+  *generateMoves() {
+    for (let [r, c] of this.game.iterAll()) {
+      if (this.game.val[r][c] !== 0)
+        continue;
 
-  emap(iter, f) {
-    for (let x of iter) {
-      f(x);
-    }
-  }
+      let possibleDigits = []
+      for (let d of this.game.iterDigits()) {
+        if (this.game.poss[r][c][d]) {
+          possibleDigits.push(d);
+        }
+      }
 
-  any(iter, fn) {
-    for (let x of iter)
-      if (fn(x))
-        return true;
-    return false;
-  }
+      if (possibleDigits.length === 1) {
+        let msg = "This was the only digit it could be!"
+        console.log(`Yield move (${r}, ${c}) = ${possibleDigits[0]} (${msg})`);
+        yield {
+          "event": "setDigit", "row": r, "col": c,
+          "digit": possibleDigits[0], "help": msg};
+        continue;
+      }
 
-  step() {
-    console.log("Stepping...")
-    if (this.moves === undefined || this.moves.length === 0) {
-      console.log("Adding moves...");
-      this.moves = this.findObviousMoves();
-    }
-    if (this.moves.length === 0) {
-      console.log("need to do some further logic");
-    } else {
-      console.log("Applying first move.");
-      this.applyMoves([this.moves.pop()]);
+      for (let d of possibleDigits) {
+        let checker = this.game.digitChecker(d);
+        let domains = [];
+        if (!any(this.game.iterOthersInRow(r, c), checker))
+          domains.push("row");
+        if (!any(this.game.iterOthersInCol(r, c), checker))
+          domains.push("column");
+        if (!any(this.game.iterOthersInBlock(r, c), checker))
+          domains.push("block");
+        if (domains.length > 0) {
+          let msg = `In the ${domains.join("+")}, only this cell could hold ${d}`
+          console.log(`Yield move (${r}, ${c}) = ${d} (${msg})`);
+          yield {
+            "event": "setDigit", "row": r, "col": c, "digit": d, "help": msg
+          }
+        }
+      }
     }
   }
 }
 
-var sid, disp;
-document.getElementById("puzzle-load").onclick = function () {
-    const response = JSON.parse(document.getElementById("puzzle-json").value);
-    disp = new SudokuDisplay(3, "sudoku");
-    sud = new Sudoku(3, disp, response.squares.map((x) => [x.y, x.x, x.value]));
-    document.getElementById("step").onclick = () => sud.step();
-};
+SOLVERS.push(ObviousSolver);
+const disp = new Display(3, "sudoku");
