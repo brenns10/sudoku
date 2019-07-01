@@ -9,6 +9,19 @@ Element.prototype.removeAll = function() {
   return this;
 }
 
+Map.prototype.getOr = function(key, orElse) {
+  if (this.has(key)) {
+    return this.get(key);
+  } else {
+    return orElse;
+  }
+}
+
+Set.prototype.first = function() {
+  for (let val of this)
+    return val;
+}
+
 /*
  * Some utility functions for dealing with iterators of "cells"
  */
@@ -336,6 +349,17 @@ class Sudoku {
     }
   }
 
+  /**
+   * Iterate over the top left corner of each block in the game.
+   */
+  *iterBlocks() {
+    for (let row = 0; row < this.degree; row++) {
+      for (let col = 0; col < this.degree; col++) {
+        yield [row * this.degree, col * this.degree];
+      }
+    }
+  }
+
   *iterOthersInRow(row, col) {
     yield *filter(this.iterRow(row), ne(row, col));
   }
@@ -364,6 +388,11 @@ class Sudoku {
   }
 }
 
+/**
+ * The ObviousSolver looks for cell which either can only be one value, or
+ * cells which are the only possible instance of a value in their row, column,
+ * or block.
+ */
 class ObviousSolver {
   constructor(game) {
     this.game = game;
@@ -416,5 +445,93 @@ class ObviousSolver {
   }
 }
 
+/**
+ * The OnlyColRowSolver looks for blocks where a digit is possible only in one
+ * row, or only one column. When that is the case, all other cells in that row
+ * or column (outside the block) may not be the digit.
+ *
+ * Graphically, let X denote a cell which may be a digit, O denote a cell which
+ * cannot. We aim to detect the following:
+ * 
+ *     |X0X|00X|XX0|
+ *     |0XX|X00|000|
+ *     |0X0|XX0|000|
+ *     +---+---+---+
+ * 
+ * In the above example, the rightmost block can have the digit in only the top
+ * row, and so the middle and left block must not have the X in that row. So we
+ * can translate the above situation into:
+ *
+ *     |000|000|XX0|
+ *     |0XX|X00|000|
+ *     |0X0|XX0|000|
+ *     +---+---+---+
+ */
+class OnlyColRowSolver {
+  constructor(game) {
+    this.game = game;
+  }
+
+  *generateMoves() {
+    for (let [tlRow, tlCol] of this.game.iterBlocks()) {
+      // First, we need to find out whether there are any digits which are only
+      // possible in one row. The condition for this is that the possible count
+      // must be greater than 1 (otherwise, we should probably just set that
+      // cell's digit), and either the row count or column count should be 0.
+      const digitToCount = new Map();
+      const digitToRows = new Map();
+      const digitToCols = new Map();
+      for (let [r, c] of this.game.iterBlock(tlRow, tlCol)) {
+        for (let d of this.game.iterDigits()) {
+          if (!this.game.poss[r][c][d])
+            continue;
+          digitToCount.set(d, 1 + digitToCount.getOr(d, 0));
+
+          let rows = digitToRows.getOr(d, new Set());
+          rows.add(r);
+          digitToRows.set(d, rows);
+
+          let cols = digitToCols.getOr(d, new Set());
+          cols.add(c);
+          digitToCols.set(d, cols);
+        }
+      }
+
+      // Now, for any digit which satisfies the above condition, we "clear" any
+      // other cell in the row/col which is also possible for this digit.
+      const degree = this.game.degree;
+      function notInBlock(cell) {
+        let [r, c] = cell;
+        return (r < tlRow) || (r >= tlRow+degree) || (c < tlCol) || (c >= tlCol+degree);
+      }
+      const game = this.game;
+      function *clearDigitFromGroup(digit, group) {
+        for (let [r, c] of filter(group, notInBlock)) {
+          if (game.poss[r][c][digit]) {
+            console.log(`Remove possibility of digit ${digit} from (${r}, ${c})`)
+            yield {
+              "event": "removePossibility",
+              "row": r, "col": c, "digit": digit
+            };
+          }
+        }
+      }
+      for (let d of this.game.iterDigits()) {
+        if (digitToCount.get(d) <= 1)
+          continue;
+        if (digitToRows.get(d).size == 1) {
+          console.log(`In block (${tlRow}, ${tlCol}), digit ${d} is present only in one row!`);
+          yield *clearDigitFromGroup(d, this.game.iterRow(digitToRows.get(d).first()));
+        }
+        if (digitToCols.get(d).size == 1) {
+          console.log(`In block (${tlRow}, ${tlCol}), digit ${d} is present only in one col!`);
+          yield *clearDigitFromGroup(d, this.game.iterCol(digitToCols.get(d).first()));
+        }
+      }
+    }
+  }
+}
+
 SOLVERS.push(ObviousSolver);
+SOLVERS.push(OnlyColRowSolver);
 const disp = new Display(3, "sudoku");
