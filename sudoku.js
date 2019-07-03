@@ -22,10 +22,10 @@ Map.prototype.getOr = function(key, orElse) {
 }
 
 /**
- * Helper to return the first item in a Set.
+ * Helper to return the first item in an iterable
  */
-Set.prototype.first = function() {
-  for (let val of this)
+function first(iter) {
+  for (let val of iter)
     return val;
 }
 
@@ -105,16 +105,21 @@ class Display {
     this.jsonText = document.getElementById(id + "-json-text");
     this.load = document.getElementById(id + "-load");
     this.step = document.getElementById(id + "-step");
+    this.updateButton = document.getElementById(id + "-update");
+    this.solverIndicators = document.getElementById(id + "-solver-indicators");
+    this.output = document.getElementById(id + "-output");
 
     this.degree = degree;
     this.grid = []
     this.game = null;
-    this.solvers = [];
 
     this.table.removeAll();
     this.load.onclick = () => self.loadGame();
     this.step.onclick = () => self.doStep();
+    this.updateButton.onclick = () => self.doUpdate();
+
     this.initCells();
+    this.initSolvers();
   }
 
   /**
@@ -142,6 +147,21 @@ class Display {
     }
   }
 
+  initSolvers() {
+    this.solvers = new Map();
+    this.solverToButton = new Map();
+    this.solverToMoves = new Map();
+    this.solverIndicators.removeAll();
+    for (let cls of SOLVERS) {
+      this.solvers.set(cls.name, new cls(this.game));
+      let btn = document.createElement('button');
+      btn.innerText = `${cls.name}: ??`;
+      btn.onclick = () => this.doIndicatorClick(cls.name);
+      this.solverIndicators.appendChild(btn);
+      this.solverToButton.set(cls.name, btn);
+    }
+  }
+
   /**
    * When the "Load" button is pressed, read the JSON blob and pull out cell
    * values, and start up a game!
@@ -149,9 +169,7 @@ class Display {
   loadGame() {
     // Create an empty game object and update the possibilities display
     this.game = new Sudoku(this.degree);
-    this.solvers = [];
-    for (let Ctor of SOLVERS)
-      this.solvers.push(new Ctor(this.game))
+    this.initSolvers();
     for (let [row, col] of this.game.iterAll())
       // it says handleRemovePossibility() but really it will just display any
       // possibility array
@@ -165,6 +183,12 @@ class Display {
     const puzzle = JSON.parse(this.jsonText.value);
     for (let square of puzzle.squares)
       this.game.setDigit(square.y, square.x, square.value);
+
+    this.output.value = "";
+  }
+
+  print(msg) {
+    this.output.value = msg + '\n' + this.output.value;
   }
 
   /**
@@ -205,26 +229,69 @@ class Display {
     }
   }
 
-  applyHint(event) {
+  applyMove(event) {
     if (this.hint !== undefined) {
       let [row, col] = this.hint;
       this.grid[row][col].classList.remove("sudoku-highlight");
     }
     this.grid[event.row][event.col].classList.add("sudoku-highlight");
     this.hint = [event.row, event.col];
+
+    if (event.help !== undefined) {
+      this.print(event.help);
+    }
+
+    this.game.applyMove(event);
+    this.solverToMoves.clear();
+    for (let [name, btn] of this.solverToButton.entries()) {
+      btn.innerText = `${name}: ??`;
+    }
+  }
+
+  doUpdate() {
+    console.log("Running update");
+    for (let [name, solver] of this.solvers.entries()) {
+      let moves = Array.from(solver.generateMoves())
+      this.solverToMoves.set(name, moves);
+      this.solverToButton.get(name).innerText = `${name}: ${moves.length}`
+    }
+  }
+
+  doIndicatorClick(name) {
+    console.log(`Indicator for ${name} clicked`);
+    const moves = this.solverToMoves.getOr(name, []);
+    let move;
+    if (moves.length > 0) {
+      console.log("Had a cached move");
+      move = moves[0];
+    } else {
+      console.log("No cached moves, trying to get a move from the solver");
+      move = first(this.solvers.get(name).generateMoves());
+    }
+    if (move !== undefined)
+      this.applyMove(move);
+    else
+      this.print(`Sorry, ${name} has no moves at the moment.`);
   }
 
   doStep() {
     console.log("Doing a step...")
-    for (let solver of this.solvers) {
+    for (let [name, moveList] of this.solverToMoves.entries()) {
+      for (let move of moveList) {
+        console.log(`Used cached move from ${name}!`);
+        this.applyMove(move);
+        return;
+      }
+    }
+    for (let [name, solver] of this.solvers.entries()) {
       for (let move of solver.generateMoves()) {
-        console.log("Got move!")
-        this.applyHint(move);
-        this.game.applyMove(move);
+        console.log(`Got a move from ${name}!`);
+        this.applyMove(move);
         return;
       }
     }
     console.log("Needs more work.");
+    this.print(`Sorry, no solvers have any moves at the moment.`);
   }
 }
 
@@ -441,7 +508,7 @@ class ObviousSolver {
       }
 
       if (possibleDigits.length === 1) {
-        let msg = "This was the only digit it could be!"
+        let msg = `${possibleDigits[0]} was the only digit this cell could be!`
         console.log(`Yield move (${r}, ${c}) = ${possibleDigits[0]} (${msg})`);
         yield {
           "event": "setDigit", "row": r, "col": c,
@@ -530,13 +597,14 @@ class OnlyColRowSolver {
         return (r < tlRow) || (r >= tlRow+degree) || (c < tlCol) || (c >= tlCol+degree);
       }
       const game = this.game;
-      function *clearDigitFromGroup(digit, group) {
+      function *clearDigitFromGroup(digit, group, type) {
         for (let [r, c] of filter(group, notInBlock)) {
           if (game.poss[r][c][digit]) {
             console.log(`Remove possibility of digit ${digit} from (${r}, ${c})`)
             yield {
               "event": "removePossibility",
-              "row": r, "col": c, "digit": digit
+              "row": r, "col": c, "digit": digit,
+              "help": `${digit} is not possible since others in its ${type} are the only ${digit} in their block`
             };
           }
         }
@@ -546,11 +614,11 @@ class OnlyColRowSolver {
           continue;
         if (digitToRows.get(d).size == 1) {
           console.log(`In block (${tlRow}, ${tlCol}), digit ${d} is present only in one row!`);
-          yield *clearDigitFromGroup(d, this.game.iterRow(digitToRows.get(d).first()));
+          yield *clearDigitFromGroup(d, this.game.iterRow(first(digitToRows.get(d))), "row");
         }
         if (digitToCols.get(d).size == 1) {
           console.log(`In block (${tlRow}, ${tlCol}), digit ${d} is present only in one col!`);
-          yield *clearDigitFromGroup(d, this.game.iterCol(digitToCols.get(d).first()));
+          yield *clearDigitFromGroup(d, this.game.iterCol(first(digitToCols.get(d))), "column");
         }
       }
     }

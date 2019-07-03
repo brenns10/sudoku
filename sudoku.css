@@ -43,3 +43,12 @@ td.sudoku-possibility {
 td.sudoku-highlight {
     background-color: rgb(230, 230, 180);
 }
+
+div.sudoku-container {
+    display: inline-block;
+}
+
+textarea.sudoku-output {
+    width: 100%;
+    height: 70px;
+}
