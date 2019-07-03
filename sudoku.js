@@ -202,6 +202,25 @@ class Display {
     else if (event.event == "removePossibility")
       this.handleRemovePossibility(
         event.row, event.col, this.game.poss[event.row][event.col]);
+    else if (event.event == "initiateGuess")
+      this.handleInitiateGuess(event);
+    else if (event.event == "changeGuess")
+      this.handleChangeGuess(event);
+  }
+
+  handleInitiateGuess(event) {
+    this.print(event.help);
+  }
+
+  handleChangeGuess(event) {
+    this.print(event.help);
+    this.changeHintHighlight(event.row, event.col);
+    for (let [row, col] of this.game.iterAll()) {
+      if (this.game.values[row][col] != 0)
+        this.handleSetDigit(row, col, this.game.values[row][col]);
+      else
+        this.handleRemovePossibility(row, col, this.game.poss[row][col])
+    }
   }
 
   handleSetDigit(row, col, digit) {
@@ -229,13 +248,19 @@ class Display {
     }
   }
 
-  applyMove(event) {
+  changeHintHighlight(row, col) {
     if (this.hint !== undefined) {
       let [row, col] = this.hint;
       this.grid[row][col].classList.remove("sudoku-highlight");
     }
-    this.grid[event.row][event.col].classList.add("sudoku-highlight");
-    this.hint = [event.row, event.col];
+    if (row !== undefined) {
+      this.grid[row][col].classList.add("sudoku-highlight");
+      this.hint = [row, col];
+    }
+  }
+
+  applyMove(event) {
+    this.changeHintHighlight(event.row, event.col);
 
     if (event.help !== undefined) {
       this.print(event.help);
@@ -301,6 +326,7 @@ class Sudoku {
     this.handlers = new Map();
     this.initPossibilities();
     this.initValues();
+    this.guesses = [];
   }
 
   /*
@@ -375,6 +401,66 @@ class Sudoku {
         row: row, col: col, digit: digit
       });
     }
+    let self=this;
+    if (!any(this.iterOtherDigits(digit), (x) => self.poss[row][col][x]))
+      this.change = true;
+  }
+
+  /**
+   * Guessing allows us to copy the game state and try guessing a particular
+   * solution for a cell. If the result gets us to a situation which is
+   * unsolvable, we can roll back the guess to the next possibility.
+   * 
+   * Once initiated, guesses work as follows. Incorrect guesses always involve
+   * a cell ending up with 0 possibilities after you set a digit (or possibly
+   * remove possibilities). When this happens, applyMove will call changeGuess()
+   * move to the next guess.
+   */
+  initiateGuess(row, col, digit) {
+    // Figure out what else this cell could be so we know what else to guess in
+    // case this goes wrong.
+    let remaining = [];
+    for (let poss in this.iterOtherDigits(digit))
+      remaining.push(poss);
+
+    this.guesses.push({
+      "row": row,
+      "col": col,
+      "guessed": digit,
+      "remaining": remaining,
+      "values": JSON.stringify(this.values),
+      "poss": JSON.stringify(this.poss)
+    });
+
+    this.sendEvent({
+      "event": "initiateGuess",
+      "row": row, "col": col, "digit": digit,
+      "help": `Starting a guess that (${row}, ${col}) is ${digit}`
+    })
+    this.setDigit(row, col, digit);
+  }
+
+  changeGuess() {
+    if (this.guesses.length <= 0)
+      console.log("OOPS - rolled back when there are no guesses");
+
+    const guess = this.guesses.pop();
+    const oldGuess = guess.guessed;
+
+    if (guess.remaining.length <= 0)
+      console.log("OOPS - no more remaining choices in our guess");
+
+    guess.guessed = guess.remaining.shift();
+    this.values = JSON.parse(guess.values);
+    this.poss = JSON.parse(guess.values);
+    this.setDigit(guess.guessed);
+    this.guesses.push(guess);
+    this.sendEvent({
+      "event": "changeGuess",
+      "row": guess.row, "col": guess.col, "digit": guess.guessed,
+      "help": `The previous guess of ${oldGuess} for (${guess.row}, ${guess.col}) was incorrect, trying ${guess.guessed}`,
+    })
+    this.change = false;
   }
 
   sendEvent(event) {
@@ -395,7 +481,15 @@ class Sudoku {
       case "removePossibility":
         this.removePossibility(event.row, event.col, event.digit);
         break;
+      case "initiateGuess":
+        this.initiateGuess(event.row, event.col, event.digit);
+        break;
+      case "changeGuess":
+        this.changeGuess();
+        break;
     }
+    if (this.change)
+      this.changeGuess();
   }
 
   /**
@@ -625,6 +719,25 @@ class OnlyColRowSolver {
   }
 }
 
+class FirstCellGuesser {
+  constructor(game) {
+    this.game = game;
+  }
+
+  *generateMoves() {
+    for (let [row, col] of this.game.iterAll()) {
+      let possible = Array.from(filter(this.game.iterDigits(), (x) => this.game.poss[row][col][x]));
+      if (possible.length > 1)
+      yield {
+        "event": "initiateGuess",
+        "row": row, "col": col, "digit": possible[0],
+        "help": "Randomly guessing the first guessable cell."
+      }
+    }
+  }
+}
+
 SOLVERS.push(ObviousSolver);
 SOLVERS.push(OnlyColRowSolver);
+SOLVERS.push(FirstCellGuesser);
 const disp = new Display(3, "sudoku");
