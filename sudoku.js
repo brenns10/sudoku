@@ -9,6 +9,10 @@ Element.prototype.removeAll = function() {
   return this;
 }
 
+/**
+ * Similar to Python's dict.get() method, providing a default if the key is not
+ * present in the map.
+ */
 Map.prototype.getOr = function(key, orElse) {
   if (this.has(key)) {
     return this.get(key);
@@ -17,13 +21,17 @@ Map.prototype.getOr = function(key, orElse) {
   }
 }
 
+/**
+ * Helper to return the first item in a Set.
+ */
 Set.prototype.first = function() {
   for (let val of this)
     return val;
 }
 
 /*
- * Some utility functions for dealing with iterators of "cells"
+ * Generic filter function for iterators. Return elements of iter where
+ * fn(element) is truthy.
  */
 function *filter(iter, fn) {
   for (let item of iter) {
@@ -33,20 +41,33 @@ function *filter(iter, fn) {
   }
 }
 
+/**
+ * "Not equal" function for cell tuples
+ */
 function ne(row, col) {
   return (l) => (l[0] !== row || l[1] !== col);
 }
 
+/**
+ * Given an iterator of cell tuples, yield transposed tuples (i.e. the row and
+ * column are swapped).
+ */
 function *transpose(iter) {
   for (let [row, col] of iter)
     yield [col, row];
 }
 
+/**
+ * Map a function over an iterable, lazily
+ */
 function *map(iter, f) {
   for (let x of iter)
     yield f(x);
 }
 
+/**
+ * Return true if any element of iter satisfies the condition specified by fn.
+ */
 function any(iter, fn) {
   for (let x of iter)
     if (fn(x))
@@ -54,6 +75,10 @@ function any(iter, fn) {
   return false;
 }
 
+/**
+ * Map a function over an iterator, and exhaust the iterator. This doesn't
+ * return the result. Maybe it would be better named foreach.
+ */
 function emap(iter, f) {
   for (let x of iter) {
     f(x);
