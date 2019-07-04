@@ -108,6 +108,7 @@ class Display {
     this.updateButton = document.getElementById(id + "-update");
     this.solverIndicators = document.getElementById(id + "-solver-indicators");
     this.output = document.getElementById(id + "-output");
+    this.guessCountSpan = document.getElementById(id + "-guess-count");
 
     this.degree = degree;
     this.grid = []
@@ -183,6 +184,19 @@ class Display {
     }
   }
 
+  updateCounters() {
+    this.guessCountSpan.innerText = `Guess Count: ${this.guessCount}, Recurse Count: ${this.recurseCount}`;
+  }
+
+  setGuessCount(val) {
+    this.guessCount = val;
+    this.updateCounters();
+  }
+  setRecurseCount(val) {
+    this.recurseCount = val;
+    this.updateCounters();
+  }
+
   /**
    * When the "Load" button is pressed, read the JSON blob and pull out cell
    * values, and start up a game!
@@ -190,9 +204,9 @@ class Display {
   loadGame() {
     // Create an empty game object and update the possibilities display
     this.game = new Sudoku(this.degree);
-    if (this.possVisible)
-      this.toggleVisibility();
     this.initSolvers();
+    this.setGuessCount(0);
+    this.setRecurseCount(0);
     for (let [row, col] of this.game.iterAll())
       // it says handleRemovePossibility() but really it will just display any
       // possibility array
@@ -211,6 +225,8 @@ class Display {
     } catch (e) {
       this.stringLoad(this.jsonText.value);
     }
+    if (this.possVisible)
+      this.toggleVisibility();
   }
 
   print(msg) {
@@ -236,14 +252,16 @@ class Display {
 
   handleInitiateGuess(event) {
     this.print(event.help);
+    this.setGuessCount(this.guessCount + 1);
   }
 
   handleChangeGuess(event) {
     this.print(event.help);
     this.changeHintHighlight(event.row, event.col);
+    this.setRecurseCount(this.recurseCount + 1);
     for (let [row, col] of this.game.iterAll()) {
-      if (this.game.values[row][col] != 0)
-        this.handleSetDigit(row, col, this.game.values[row][col]);
+      if (this.game.val[row][col] != 0)
+        this.handleSetDigit(row, col, this.game.val[row][col]);
       else
         this.handleRemovePossibility(row, col, this.game.poss[row][col])
     }
@@ -261,7 +279,7 @@ class Display {
     if (!this.possVisible)
       cell.classList.add("hidden");
     const table = document.createElement("table");
-    table.classList.add("sudoku-possoibility-table");
+    table.classList.add("sudoku-possibility-table");
     cell.appendChild(table);
     let digit = 1;
     for (let r = 0; r < this.degree; r++) {
@@ -269,8 +287,9 @@ class Display {
       for (let c = 0; c < this.degree; c++) {
         let possibilityCell = row.insertCell();
         possibilityCell.classList.add("sudoku-possibility");
-        if (possibilities[digit]) {
-          possibilityCell.textContent = digit.toString();
+        possibilityCell.textContent = digit.toString();
+        if (!possibilities[digit]) {
+          possibilityCell.classList.add("hidden");
         }
         digit++;
       }
@@ -361,11 +380,6 @@ class Display {
     }
     this.updateButton.classList.toggle("hidden");
     this.solverIndicators.classList.toggle("hidden");
-    if (this.possVisible) {
-      this.showButton.innerText = "Hide";
-    } else {
-      this.showButton.innerText = "Reveal";
-    }
   }
 }
 
@@ -450,9 +464,13 @@ class Sudoku {
         row: row, col: col, digit: digit
       });
     }
-    let self=this;
-    if (!any(this.iterOtherDigits(digit), (x) => self.poss[row][col][x]))
-      this.change = true;
+    // Return if there is still some possible digit for this cell
+    for (let other of this.iterOtherDigits(digit))
+      if (this.poss[row][col][other])
+        return;
+
+    // Otherwise, we need to make a change!
+    this.change = true;
   }
 
   /**
@@ -469,15 +487,18 @@ class Sudoku {
     // Figure out what else this cell could be so we know what else to guess in
     // case this goes wrong.
     let remaining = [];
-    for (let poss in this.iterOtherDigits(digit))
-      remaining.push(poss);
+    for (let other of this.iterOtherDigits(digit)) {
+      if (this.poss[row][col][other]) {
+        remaining.push(other);
+      }
+    }
 
     this.guesses.push({
       "row": row,
       "col": col,
       "guessed": digit,
       "remaining": remaining,
-      "values": JSON.stringify(this.values),
+      "val": JSON.stringify(this.val),
       "poss": JSON.stringify(this.poss)
     });
 
@@ -499,16 +520,17 @@ class Sudoku {
     if (guess.remaining.length <= 0)
       console.log("OOPS - no more remaining choices in our guess");
 
+    //debugger;
     guess.guessed = guess.remaining.shift();
-    this.values = JSON.parse(guess.values);
-    this.poss = JSON.parse(guess.values);
-    this.setDigit(guess.guessed);
+    this.val = JSON.parse(guess.val);
+    this.poss = JSON.parse(guess.poss);
     this.guesses.push(guess);
     this.sendEvent({
       "event": "changeGuess",
       "row": guess.row, "col": guess.col, "digit": guess.guessed,
       "help": `The previous guess of ${oldGuess} for (${guess.row}, ${guess.col}) was incorrect, trying ${guess.guessed}`,
     })
+    this.setDigit(guess.row, guess.col, guess.guessed);
     this.change = false;
   }
 
