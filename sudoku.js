@@ -112,6 +112,9 @@ class Display {
     this.degree = degree;
     this.grid = []
     this.game = null;
+    this.possVisible = false;
+    this.updateButton.classList.add("hidden");
+    this.solverIndicators.classList.add("hidden");
 
     this.table.removeAll();
     this.load.onclick = () => self.loadGame();
@@ -169,6 +172,8 @@ class Display {
   loadGame() {
     // Create an empty game object and update the possibilities display
     this.game = new Sudoku(this.degree);
+    if (this.possVisible)
+      this.toggleVisibility();
     this.initSolvers();
     for (let [row, col] of this.game.iterAll())
       // it says handleRemovePossibility() but really it will just display any
@@ -226,13 +231,16 @@ class Display {
   handleSetDigit(row, col, digit) {
     this.grid[row][col].removeAll();
     this.grid[row][col].textContent = digit;
+    this.grid[row][col].classList.remove("hidden");
   }
 
   handleRemovePossibility(rowIdx, colIdx, possibilities) {
     const cell = this.grid[rowIdx][colIdx];
     cell.removeAll();
+    if (!this.possVisible)
+      cell.classList.add("hidden");
     const table = document.createElement("table");
-    table.classList.add("sudoku-possibility-table");
+    table.classList.add("sudoku-possoibility-table");
     cell.appendChild(table);
     let digit = 1;
     for (let r = 0; r < this.degree; r++) {
@@ -300,6 +308,11 @@ class Display {
   }
 
   doStep() {
+    if (!this.possVisible) {
+      this.print("Revealing all the possibilities.")
+      this.toggleVisibility();
+      return;
+    }
     console.log("Doing a step...")
     for (let [name, moveList] of this.solverToMoves.entries()) {
       for (let move of moveList) {
@@ -317,6 +330,21 @@ class Display {
     }
     console.log("Needs more work.");
     this.print(`Sorry, no solvers have any moves at the moment.`);
+  }
+
+  toggleVisibility() {
+    this.possVisible = !this.possVisible;
+    for (let [row, col] of this.game.iterAll()) {
+      if (this.game.val[row][col] == 0)
+        this.grid[row][col].classList.toggle('hidden');
+    }
+    this.updateButton.classList.toggle("hidden");
+    this.solverIndicators.classList.toggle("hidden");
+    if (this.possVisible) {
+      this.showButton.innerText = "Hide";
+    } else {
+      this.showButton.innerText = "Reveal";
+    }
   }
 }
 
