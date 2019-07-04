@@ -165,6 +165,24 @@ class Display {
     }
   }
 
+  jsonLoad(parsed) {
+    for (let square of parsed.squares)
+      this.game.setDigit(square.y, square.x, square.value);
+  }
+
+  stringLoad(string) {
+    if (string.length != 81) {
+      this.print("Your string should be 81 characters");
+      return;
+    }
+    for (let i = 0; i < string.length; i++) {
+      let digit = string.charAt(i);
+      if (/\d/.test(digit)) {
+        this.game.setDigit(Math.floor(i / 9), i % 9, parseInt(digit));
+      }
+    }
+  }
+
   /**
    * When the "Load" button is pressed, read the JSON blob and pull out cell
    * values, and start up a game!
@@ -184,12 +202,15 @@ class Display {
     // the game data
     this.game.addHandler("display", (evt) => this.handler(evt));
 
-    // And load the data
-    const puzzle = JSON.parse(this.jsonText.value);
-    for (let square of puzzle.squares)
-      this.game.setDigit(square.y, square.x, square.value);
-
     this.output.value = "";
+
+    // And load the data
+    try {
+      const puzzle = JSON.parse(this.jsonText.value);
+      this.jsonLoad(puzzle);
+    } catch (e) {
+      this.stringLoad(this.jsonText.value);
+    }
   }
 
   print(msg) {
